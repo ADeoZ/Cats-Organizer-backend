@@ -1,15 +1,19 @@
 const uuid = require('uuid');
+const path = require('path');
+const fs = require('fs');
 
 module.exports = class Storage {
-  constructor(ws, dB, categorydB) {
-    this.ws = ws;
+  constructor(dB, categorydB, filesDir) {
+    // this.ws = ws;
     this.dB = dB;
     this.category = categorydB;
+    this.filesDir = filesDir;
+    this.allowedTypes = ['image', 'video', 'audio'];
   }
 
   init() {
     this.ws.on('message', (message) => {
-      const command = typeof (message) === 'string' ? JSON.parse(message) : { event: 'file' };
+      const command = JSON.parse(message);
       console.log(command);
 
       // Запрос на данные из БД
@@ -45,7 +49,7 @@ module.exports = class Storage {
     }
 
     const data = {
-      type: 'database',
+      event: 'database',
       dB: returnDB,
       side: { links: this.category.links.length },
       position: startPosition - 10,
@@ -55,13 +59,13 @@ module.exports = class Storage {
 
   // Запрос на данные из категории
   eventStorage(category) {
-    this.wsSend({ type: 'storage', category, data: this.category[category] });
+    this.wsSend({ event: 'storage', category, data: this.category[category] });
   }
 
   // Запрос на выдачу сообщения из БД
   eventSelect(select) {
     const message = this.dB.find((item) => item.id === select);
-    this.wsSend({ type: 'select', message });
+    this.wsSend({ event: 'select', message });
   }
 
   // Новое сообщение
@@ -70,15 +74,70 @@ module.exports = class Storage {
       id: uuid.v1(),
       message,
       date: Date.now(),
+      type: 'text',
     };
     this.dB.push(data);
     this.linksToLinks(message, data.id);
-    this.wsSend({ ...data, type: 'text', side: { links: this.category.links.length } });
+    this.wsSend({ ...data, event: 'text', side: { links: this.category.links.length } });
   }
 
   // Отправка ответа сервера
   wsSend(data) {
     this.ws.send(JSON.stringify(data));
+  }
+
+  // Получение и обработка файлов
+  loadFile(file) {
+    return new Promise((resolve, reject) => {
+      const { fileName, fileType } = this.fileToFile(file);
+      const oldPath = file.path;
+      const newPath = path.join(this.filesDir, fileName);
+  
+      const callback = (error) => reject(error);
+  
+      const readStream = fs.createReadStream(oldPath);
+      const writeStream = fs.createWriteStream(newPath);
+  
+      readStream.on('error', callback);
+      writeStream.on('error', callback);
+  
+      readStream.on('close', () => {
+        fs.unlink(oldPath, callback);
+
+        const data = {
+          id: uuid.v1(),
+          message: fileName,
+          date: Date.now(),
+          type: fileType,
+        };
+        this.dB.push(data);
+
+        this.category[fileType].push({ file: fileName, messageId: data.id });
+
+        resolve(data);
+      });
+  
+      readStream.pipe(writeStream);
+    });
+  }
+
+  // Распределение в базу файлов
+  fileToFile(file) {
+    // Определяем тип файла
+    let fileType = file.type.split('/')[0];
+    fileType = this.allowedTypes.includes(fileType) ? fileType : 'file';
+
+    // Уточняем уникальность имени файла
+    let fileName = file.name;
+    let index = 1;
+    while (this.category[fileType].findIndex((item) => item.file === fileName) > -1) {
+          const fileExtension = file.name.split('.').pop();
+      const filePrefName = file.name.split(fileExtension)[0].slice(0, -1);
+      fileName = filePrefName + '_' + index + '.' + fileExtension;
+      index += 1;
+    }
+
+    return { fileName, fileType };
   }
 
   // Запись в базу ссылок
