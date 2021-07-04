@@ -1,6 +1,7 @@
 const uuid = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const { constants } = require('buffer');
 
 module.exports = class Storage {
   constructor(dB, categorydB, filesDir) {
@@ -34,6 +35,11 @@ module.exports = class Storage {
       // Новое сообщение
       if (command.event === 'message') {
         this.eventMessage(command.message);
+      }      
+      
+      // Удалить сообщение
+      if (command.event === 'delete') {
+        this.eventDelete(command.message);
       }
     });
   }
@@ -51,7 +57,7 @@ module.exports = class Storage {
     const data = {
       event: 'database',
       dB: returnDB,
-      side: { links: this.category.links.length },
+      side: this.createSideObject(),
       position: startPosition - 10,
     };
     this.wsSend(data);
@@ -78,12 +84,38 @@ module.exports = class Storage {
     };
     this.dB.push(data);
     this.linksToLinks(message, data.id);
-    this.wsSend({ ...data, event: 'text', side: { links: this.category.links.length } });
+    this.wsSend({ ...data, event: 'text', side: this.createSideObject() });
+  }
+
+  eventDelete(id) {
+    const unlinkFiles = new Set();
+    [...this.allowedTypes, 'file'].forEach((type) => {
+      const filesInCategory = this.category[type].filter((item) => item.messageId === id).map((item) => item.name);
+      filesInCategory.forEach((fileName) => unlinkFiles.add(fileName));
+      this.category[type] = this.category[type].filter((item) => item.messageId !== id);
+    });
+    unlinkFiles.forEach((fileName) => {
+      fs.unlink(path.join(this.filesDir, fileName), () => {});
+    });
+
+    const messageIndex = this.dB.findIndex((item) => item.id === id);
+    this.dB.splice(messageIndex, 1);
+    this.wsSend({ id, event: 'delete', side: this.createSideObject() });
   }
 
   // Отправка ответа сервера
   wsSend(data) {
     this.ws.send(JSON.stringify(data));
+  }
+
+  // Формирование объекта side с информацией по категориям хранилища
+  createSideObject() {
+    const sideLengths = {};
+    for (const category in this.category) {
+      sideLengths[category] = this.category[category].length;
+    }
+    console.log(sideLengths);
+    return sideLengths;
   }
 
   // Получение и обработка файлов
@@ -112,9 +144,9 @@ module.exports = class Storage {
         };
         this.dB.push(data);
 
-        this.category[fileType].push({ file: fileName, messageId: data.id });
+        this.category[fileType].push({ name: fileName, messageId: data.id });
 
-        resolve(data);
+        resolve({ ...data, side: this.createSideObject() });
       });
   
       readStream.pipe(writeStream);
@@ -130,7 +162,7 @@ module.exports = class Storage {
     // Уточняем уникальность имени файла
     let fileName = file.name;
     let index = 1;
-    while (this.category[fileType].findIndex((item) => item.file === fileName) > -1) {
+    while (this.category[fileType].findIndex((item) => item.name === fileName) > -1) {
           const fileExtension = file.name.split('.').pop();
       const filePrefName = file.name.split(fileExtension)[0].slice(0, -1);
       fileName = filePrefName + '_' + index + '.' + fileExtension;
@@ -144,7 +176,7 @@ module.exports = class Storage {
   linksToLinks(text, messageId) {
     const links = text.match(/(http:\/\/|https:\/\/){1}(www)?([\da-z.-]+)\.([a-z.]{2,6})([/\w.-?%#&-]*)*\/?/gi);
     if (links) {
-      this.category.links.push(...links.map((item) => ({ link: item, messageId })));
+      this.category.links.push(...links.map((item) => ({ name: item, messageId })));
     }
   }
 };
