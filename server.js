@@ -41,16 +41,16 @@ const wsServer = new WS.Server({ server });
 
 // DATABASE
 const dB = [
-  {id: '123', message: 'Тестовый текст', date: Date.now(), type: 'text'},
-  {id: '124', message: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam pellentesque massa vitae libero luctus, et luctus orci consequat. Fusce fringilla venenatis dapibus.', date: Date.now(), type: 'text'},
-  {id: '125', message: 'Т', date: Date.now(), type: 'text'},
-  {id: '126', message: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam pellentesque massa vitae libero luctus, et luctus orci consequat. Fusce fringilla venenatis dapibus. Praesent eget sagittis augue. Pellentesque ac nunc dolor. Nullam tortor ipsum, laoreet mattis leo et, congue porttitor magna. Aliquam quis elit sem. Integer semper tristique nisl, ac elementum felis accumsan consequat.', date: Date.now(), type: 'text'},
-  {id: '127', message: 'Тестовый текст', date: Date.now(), type: 'text'},
-  {id: '29a86030-d83c-11eb-9a19-87bef25338c3', message: 'Ссылки 1 http://ya.ru 2 https://yandex.ru 3 https://google.com 4 http://vk.com', date: Date.now(), type: 'text'},
-  {id: 'd4bb4b20-da82-11eb-9154-2d8ca54d4d13', message: 'cat.jpg', date: Date.now(), type: 'image'},
+  {id: '123', message: 'Тестовый текст', date: Date.now(), geo: '', type: 'text'},
+  {id: '124', message: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam pellentesque massa vitae libero luctus, et luctus orci consequat. Fusce fringilla venenatis dapibus.', date: Date.now(), geo: '', type: 'text'},
+  {id: '125', message: 'Т', date: Date.now(), geo: '', type: 'text'},
+  {id: '126', message: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam pellentesque massa vitae libero luctus, et luctus orci consequat. Fusce fringilla venenatis dapibus. Praesent eget sagittis augue. Pellentesque ac nunc dolor. Nullam tortor ipsum, laoreet mattis leo et, congue porttitor magna. Aliquam quis elit sem. Integer semper tristique nisl, ac elementum felis accumsan consequat.', date: Date.now(), geo: '', type: 'text'},
+  {id: '127', message: 'Тестовый текст с координатами', date: Date.now(), geo: '55.692493, 37.607834', type: 'text'},
+  {id: '29a86030-d83c-11eb-9a19-87bef25338c3', message: 'Ссылки 1 http://ya.ru 2 https://yandex.ru 3 https://google.com 4 http://vk.com', date: Date.now(), geo: '', type: 'text'},
+  {id: 'd4bb4b20-da82-11eb-9154-2d8ca54d4d13', message: 'cat.jpg', date: Date.now(), geo: '', type: 'image'},
   {id: '128', message: 'nightcats.mp4', date: Date.now(), type: 'video'},
-  {id: '129', message: 'oh_long_johnson.mp3', date: Date.now(), type: 'audio'},
-  {id: '130', message: 'knitting.pdf', date: Date.now(), type: 'file'},
+  {id: '129', message: 'oh_long_johnson.mp3', date: Date.now(), geo: '55.692493, 37.607834', type: 'audio'},
+  {id: '130', message: 'knitting.pdf', date: Date.now(), geo: '', type: 'file'},
 ];
 const category = {
   links: [
@@ -73,22 +73,27 @@ const category = {
   ],
 };
 
-let storage = new Storage(dB, category, filesDir);
+// let storage = new Storage(dB, category, filesDir);
+const clients = [];
 wsServer.on('connection', (ws) => {
-  // let storage = new Storage(ws, dB, category, filesDir);
-  storage.ws = ws;
+  // storage.ws = ws;
+  clients.push(ws);
+  const storage = new Storage(dB, category, filesDir, ws, clients);
   storage.init();
 
   router.post('/upload', async (ctx) => {
-    storage.loadFile(ctx.request.files.file).then((result) => {
-      storage.wsSend({ ...result, event: 'file' });
+    storage.loadFile(ctx.request.files.file, ctx.request.body.geo).then((result) => {
+      storage.wsAllSend({ ...result, event: 'file' });
     });
     ctx.response.status = 204;
   });
 
-  // ws.on('close', () => {
-  //   storage = '';
-  // });
+  ws.on('close', () => {
+    const wsIndex = clients.indexOf(ws);
+    if (wsIndex !== -1) {
+      clients.splice(wsIndex, 1);
+    }
+  });
 });
 
 server.listen(port, () => console.log('Server started'));

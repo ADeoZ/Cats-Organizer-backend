@@ -4,8 +4,9 @@ const fs = require('fs');
 const { constants } = require('buffer');
 
 module.exports = class Storage {
-  constructor(dB, categorydB, filesDir) {
-    // this.ws = ws;
+  constructor(dB, categorydB, filesDir, ws, clients) {
+    this.ws = ws;
+    this.clients = clients;
     this.dB = dB;
     this.category = categorydB;
     this.filesDir = filesDir;
@@ -35,8 +36,8 @@ module.exports = class Storage {
       // Новое сообщение
       if (command.event === 'message') {
         this.eventMessage(command.message);
-      }      
-      
+      }
+
       // Удалить сообщение
       if (command.event === 'delete') {
         this.eventDelete(command.message);
@@ -76,17 +77,20 @@ module.exports = class Storage {
 
   // Новое сообщение
   eventMessage(message) {
+    const { text, geo } = message;
     const data = {
       id: uuid.v1(),
-      message,
+      message: text,
       date: Date.now(),
       type: 'text',
+      geo,
     };
     this.dB.push(data);
-    this.linksToLinks(message, data.id);
-    this.wsSend({ ...data, event: 'text', side: this.createSideObject() });
+    this.linksToLinks(text, data.id);
+    this.wsAllSend({ ...data, event: 'text', side: this.createSideObject() });
   }
 
+  // Удаление сообщения
   eventDelete(id) {
     const unlinkFiles = new Set();
     [...this.allowedTypes, 'file'].forEach((type) => {
@@ -100,12 +104,19 @@ module.exports = class Storage {
 
     const messageIndex = this.dB.findIndex((item) => item.id === id);
     this.dB.splice(messageIndex, 1);
-    this.wsSend({ id, event: 'delete', side: this.createSideObject() });
+    this.wsAllSend({ id, event: 'delete', side: this.createSideObject() });
   }
 
   // Отправка ответа сервера
   wsSend(data) {
     this.ws.send(JSON.stringify(data));
+  }
+
+  // Рассылка ответов всем клиента сервера (для поддержки синхронизации)
+  wsAllSend(data) {
+    for(const client of this.clients) {
+      client.send(JSON.stringify(data));
+    }
   }
 
   // Формирование объекта side с информацией по категориям хранилища
@@ -119,20 +130,20 @@ module.exports = class Storage {
   }
 
   // Получение и обработка файлов
-  loadFile(file) {
+  loadFile(file, geo) {
     return new Promise((resolve, reject) => {
       const { fileName, fileType } = this.fileToFile(file);
       const oldPath = file.path;
       const newPath = path.join(this.filesDir, fileName);
-  
+
       const callback = (error) => reject(error);
-  
+
       const readStream = fs.createReadStream(oldPath);
       const writeStream = fs.createWriteStream(newPath);
-  
+
       readStream.on('error', callback);
       writeStream.on('error', callback);
-  
+
       readStream.on('close', () => {
         fs.unlink(oldPath, callback);
 
@@ -141,6 +152,7 @@ module.exports = class Storage {
           message: fileName,
           date: Date.now(),
           type: fileType,
+          geo,
         };
         this.dB.push(data);
 
@@ -148,7 +160,7 @@ module.exports = class Storage {
 
         resolve({ ...data, side: this.createSideObject() });
       });
-  
+
       readStream.pipe(writeStream);
     });
   }
@@ -159,13 +171,18 @@ module.exports = class Storage {
     let fileType = file.type.split('/')[0];
     fileType = this.allowedTypes.includes(fileType) ? fileType : 'file';
 
+    // Если файл - Blob из MediaRecorder
+    if (file.name === 'blob') {
+      file.name = `recorder.${file.type.split('/')[1]}`;
+    }
+
     // Уточняем уникальность имени файла
     let fileName = file.name;
     let index = 1;
     while (this.category[fileType].findIndex((item) => item.name === fileName) > -1) {
-          const fileExtension = file.name.split('.').pop();
+      const fileExtension = file.name.split('.').pop();
       const filePrefName = file.name.split(fileExtension)[0].slice(0, -1);
-      fileName = filePrefName + '_' + index + '.' + fileExtension;
+      fileName = `${filePrefName}_${index}.${fileExtension}`;
       index += 1;
     }
 
