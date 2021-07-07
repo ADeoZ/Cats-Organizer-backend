@@ -4,11 +4,12 @@ const fs = require('fs');
 const { constants } = require('buffer');
 
 module.exports = class Storage {
-  constructor(dB, categorydB, filesDir, ws, clients) {
+  constructor(dB, categorydB, favouritesdB, filesDir, ws, clients) {
     this.ws = ws;
     this.clients = clients;
     this.dB = dB;
     this.category = categorydB;
+    this.favourites = favouritesdB;
     this.filesDir = filesDir;
     this.allowedTypes = ['image', 'video', 'audio'];
   }
@@ -42,6 +43,21 @@ module.exports = class Storage {
       if (command.event === 'delete') {
         this.eventDelete(command.message);
       }
+
+      // Добавить в избранное
+      if (command.event === 'favourite') {
+        this.eventFavourite(command.message);
+      }
+
+      // Удалить из избранного
+      if (command.event === 'favouriteRemove') {
+        this.eventFavouriteRemove(command.message);
+      }
+
+      // Запрос на все избранные сообщения
+      if (command.event === 'favouritesLoad') {
+        this.eventFavouritesLoad(command.message);
+      }
     });
   }
 
@@ -58,6 +74,7 @@ module.exports = class Storage {
     const data = {
       event: 'database',
       dB: returnDB,
+      favourites: [...this.favourites],
       side: this.createSideObject(),
       position: startPosition - 10,
     };
@@ -107,6 +124,39 @@ module.exports = class Storage {
     this.wsAllSend({ id, event: 'delete', side: this.createSideObject() });
   }
 
+  // Добавление в избранное
+  eventFavourite(id) {
+    this.favourites.add(id);
+    this.wsAllSend({ id, event: 'favourite', side: this.createSideObject() });
+  }
+
+  // Удаление из избранного
+  eventFavouriteRemove(id) {
+    this.favourites.delete(id);
+    this.wsAllSend({ id, event: 'favouriteRemove', side: this.createSideObject() });
+  }
+
+  // Выборка всех избранных сообщений
+  eventFavouritesLoad(){
+    const filterMessages = this.dB.filter((message) => this.favourites.has(message.id));
+    // Для "ленивой" подгрузки
+    const startPosition = filterMessages.length;
+    const itemCounter = startPosition > 10 ? 10 : startPosition;
+    const returnDB = [];
+    for (let i = 1; i <= itemCounter; i += 1) {
+      returnDB.push(filterMessages[startPosition - i]);
+    }
+
+    const data = {
+      event: 'favouritesLoad',
+      dB: returnDB,
+      favourites: [...this.favourites],
+      side: this.createSideObject(),
+      position: startPosition - 10,
+    };
+    this.wsSend(data);
+  }
+
   // Отправка ответа сервера
   wsSend(data) {
     this.ws.send(JSON.stringify(data));
@@ -122,6 +172,7 @@ module.exports = class Storage {
   // Формирование объекта side с информацией по категориям хранилища
   createSideObject() {
     const sideLengths = {};
+    sideLengths.favourites = this.favourites.size;
     for (const category in this.category) {
       sideLengths[category] = this.category[category].length;
     }

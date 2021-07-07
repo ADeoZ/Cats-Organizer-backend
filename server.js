@@ -51,6 +51,7 @@ const dB = [
   {id: '128', message: 'nightcats.mp4', date: Date.now(), type: 'video'},
   {id: '129', message: 'oh_long_johnson.mp3', date: Date.now(), geo: '55.692493, 37.607834', type: 'audio'},
   {id: '130', message: 'knitting.pdf', date: Date.now(), geo: '', type: 'file'},
+  {id: '131', message: 'Сообщение в избранном', date: Date.now(), geo: '', type: 'text'},
 ];
 const category = {
   links: [
@@ -72,13 +73,13 @@ const category = {
     { name: 'knitting.pdf', messageId: '130' },
   ],
 };
+const  favourites = new Set(['127', '29a86030-d83c-11eb-9a19-87bef25338c3', '125', '131']);
 
-// let storage = new Storage(dB, category, filesDir);
+
 const clients = [];
 wsServer.on('connection', (ws) => {
-  // storage.ws = ws;
   clients.push(ws);
-  const storage = new Storage(dB, category, filesDir, ws, clients);
+  const storage = new Storage(dB, category, favourites, filesDir, ws, clients);
   storage.init();
 
   router.post('/upload', async (ctx) => {
