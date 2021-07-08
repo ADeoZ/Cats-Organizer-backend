@@ -58,6 +58,16 @@ module.exports = class Storage {
       if (command.event === 'favouritesLoad') {
         this.eventFavouritesLoad(command.message);
       }
+
+      // Закрепить сообщение
+      if (command.event === 'pin') {
+        this.eventPin(command.message);
+      }
+
+      // Удалить из закреплённого
+      if (command.event === 'unpin') {
+        this.eventUnpin(command.message);
+      }
     });
   }
 
@@ -71,10 +81,13 @@ module.exports = class Storage {
       returnDB.push(this.dB[startPosition - i]);
     }
 
+    const pinnedMessage = this.dB.find((message) => message.pinned);
+
     const data = {
       event: 'database',
       dB: returnDB,
       favourites: [...this.favourites],
+      pinnedMessage,
       side: this.createSideObject(),
       position: startPosition - 10,
     };
@@ -155,6 +168,24 @@ module.exports = class Storage {
       position: startPosition - 10,
     };
     this.wsSend(data);
+  }
+
+  // Закрепление сообщения
+  eventPin(id) {
+    const hasPinned = this.dB.find((message) => message.pinned);
+    if (hasPinned) {
+      delete hasPinned.pinned;
+    }
+
+    this.dB.find((message) => message.id === id).pinned = true;
+    this.wsAllSend({ id, event: 'pin' });
+  }
+
+  // Открепление сообщения
+  eventUnpin(id) {
+    delete this.dB.find((message) => message.id === id).pinned;
+    this.wsAllSend({ id, event: 'unpin' });
+    console.log(this.dB);
   }
 
   // Отправка ответа сервера
