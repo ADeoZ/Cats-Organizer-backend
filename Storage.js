@@ -17,7 +17,6 @@ module.exports = class Storage {
   init() {
     this.ws.on('message', (message) => {
       const command = JSON.parse(message);
-      console.log(command);
 
       // Запрос на данные из БД
       if (command.event === 'load') {
@@ -123,7 +122,7 @@ module.exports = class Storage {
   // Удаление сообщения
   eventDelete(id) {
     const unlinkFiles = new Set();
-    [...this.allowedTypes, 'file'].forEach((type) => {
+    [...this.allowedTypes, 'links', 'file'].forEach((type) => {
       const filesInCategory = this.category[type].filter((item) => item.messageId === id).map((item) => item.name);
       filesInCategory.forEach((fileName) => unlinkFiles.add(fileName));
       this.category[type] = this.category[type].filter((item) => item.messageId !== id);
@@ -131,6 +130,8 @@ module.exports = class Storage {
     unlinkFiles.forEach((fileName) => {
       fs.unlink(path.join(this.filesDir, fileName), () => {});
     });
+
+    this.favourites.delete(id);
 
     const messageIndex = this.dB.findIndex((item) => item.id === id);
     this.dB.splice(messageIndex, 1);
@@ -160,10 +161,13 @@ module.exports = class Storage {
       returnDB.push(filterMessages[startPosition - i]);
     }
 
+    const pinnedMessage = this.dB.find((message) => message.pinned);
+
     const data = {
       event: 'favouritesLoad',
       dB: returnDB,
       favourites: [...this.favourites],
+      pinnedMessage,
       side: this.createSideObject(),
       position: startPosition - 10,
     };
@@ -177,15 +181,15 @@ module.exports = class Storage {
       delete hasPinned.pinned;
     }
 
-    this.dB.find((message) => message.id === id).pinned = true;
-    this.wsAllSend({ id, event: 'pin' });
+    const pinnedMessage = this.dB.find((message) => message.id === id);
+    pinnedMessage.pinned = true;
+    this.wsAllSend({ pinnedMessage, event: 'pin' });
   }
 
   // Открепление сообщения
   eventUnpin(id) {
     delete this.dB.find((message) => message.id === id).pinned;
     this.wsAllSend({ id, event: 'unpin' });
-    console.log(this.dB);
   }
 
   // Отправка ответа сервера
@@ -207,7 +211,6 @@ module.exports = class Storage {
     for (const category in this.category) {
       sideLengths[category] = this.category[category].length;
     }
-    console.log(sideLengths);
     return sideLengths;
   }
 
